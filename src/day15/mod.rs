@@ -1,19 +1,22 @@
-use std::collections::HashMap;
-
 fn solve(input: &mut Vec<u32>, turns: u32) -> u32 {
+    use std::collections::hash_map::Entry;
+    use std::collections::HashMap;
     let mut seen = HashMap::new();
     let mut last = input.pop().unwrap();
     for (i, n) in input.iter().enumerate() {
         seen.insert(*n, i as u32 + 1);
     }
     for i in input.len() + 2..=(turns as usize) {
-        if seen.contains_key(&last) {
-            let prev = *seen.get(&last).unwrap();
-            seen.insert(last, i as u32 - 1);
-            last = i as u32 - 1 - prev;
-        } else {
-            seen.insert(last, i as u32 - 1);
-            last = 0;
+        match seen.entry(last) {
+            Entry::Occupied(mut entry) => {
+                let prev = *(entry.get());
+                entry.insert(i as u32 - 1);
+                last = i as u32 - 1 - prev;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(i as u32 - 1);
+                last = 0;
+            }
         }
     }
     last
