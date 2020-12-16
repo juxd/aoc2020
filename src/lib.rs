@@ -1,4 +1,4 @@
-#![feature(never_type)]
+#![feature(drain_filter, never_type)]
 #[macro_use]
 extern crate nom;
 

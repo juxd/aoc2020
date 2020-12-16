@@ -7,6 +7,7 @@ use nom::{
     sequence::tuple,
     IResult,
 };
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::RangeInclusive;
 
 named!(field_name<&str, &str>, is_not!(":"));
@@ -27,11 +28,13 @@ enum Info {
 }
 
 fn field_parser(input: &str) -> IResult<&str, (String, RangeInclusive<i32>, RangeInclusive<i32>)> {
-    let (input, name) = field_name(input)?;
-    let (input, _) = tag(": ")(input)?;
-    let (input, a) = range_parser(input)?;
-    let (input, _) = tag(" or ")(input)?;
-    let (input, b) = range_parser(input)?;
+    let (input, (name, _, a, _, b)) = tuple((
+        field_name,
+        tag(": "),
+        range_parser,
+        tag(" or "),
+        range_parser,
+    ))(input)?;
 
     IResult::Ok((input, (String::from(name), a, b)))
 }
@@ -63,15 +66,19 @@ fn parse_input(input: &str) -> (Vec<Info>, Vec<Info>) {
         })
 }
 
-pub fn solve_p1(input: &str) -> i32 {
-    let (fields, tickets) = parse_input(input);
-    let ranges = fields
+fn all_ranges(fields: &[Info]) -> Vec<&RangeInclusive<i32>> {
+    fields
         .iter()
         .flat_map(|info| match info {
             Info::Field(_, a, b) => vec![a, b],
             Info::Ticket(..) => vec![],
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
+
+pub fn solve_p1(input: &str) -> i32 {
+    let (fields, tickets) = parse_input(input);
+    let ranges = all_ranges(&fields);
     tickets
         .iter()
         .map(|info| match info {
@@ -90,6 +97,88 @@ pub fn solve_p1(input: &str) -> i32 {
         .sum()
 }
 
+pub fn solve_p2(input: &str) -> HashMap<String, Vec<usize>> {
+    let (fields, tickets) = parse_input(input);
+    let fields_as_tuples = fields
+        .iter()
+        .filter_map(|info| match info {
+            Info::Field(name, a, b) => Some((name, a, b)),
+            Info::Ticket(..) => None,
+        })
+        .collect::<Vec<_>>();
+    let all_ranges = all_ranges(&fields);
+    let valid_tickets = tickets[1..]
+        .iter()
+        .filter_map(|info| match info {
+            Info::Field(..) => None,
+            Info::Ticket(fields) => {
+                if fields
+                    .iter()
+                    .any(|field_val| all_ranges.iter().all(|range| !range.contains(field_val)))
+                {
+                    None
+                } else {
+                    Some(fields)
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    let candidates_per_field = valid_tickets
+        .iter()
+        .fold(
+            vec![fields_as_tuples; valid_tickets[0].len()],
+            |mut candidates, ticket| {
+                candidates
+                    .iter_mut()
+                    .zip(ticket.iter())
+                    .map(|(previous_candidates, field_val)| {
+                        previous_candidates.drain_filter(|(_, a, b)| {
+                            !a.contains(field_val) && !b.contains(field_val)
+                        });
+                        previous_candidates.to_vec()
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
+        .iter()
+        .map(|c| {
+            c.iter()
+                .map(|(name, ..)| String::from(*name))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut candidate_field_appearances = HashMap::new();
+    let mut seen = HashSet::new();
+    for (field_index, candidates) in candidates_per_field.iter().enumerate() {
+        for candidate in candidates {
+            candidate_field_appearances
+                .entry(candidate.to_string())
+                .or_insert_with(Vec::new)
+                .push(field_index);
+        }
+    }
+    let mut pop_q = VecDeque::new();
+    for (candidate, indices) in candidate_field_appearances.iter() {
+        if indices.len() == 1 {
+            pop_q.push_back((candidate.to_string(), indices[0]));
+            seen.insert(candidate.to_string());
+        }
+    }
+    while let Some((candidate, index)) = pop_q.pop_front() {
+        for (candidate_o, indices) in candidate_field_appearances.iter_mut() {
+            if candidate_o == &candidate {
+                continue;
+            }
+            indices.drain_filter(|idx| idx == &index);
+            if indices.len() == 1 && !seen.contains(candidate_o) {
+                pop_q.push_back((candidate_o.to_string(), indices[0]));
+                seen.insert(candidate_o.to_string());
+            }
+        }
+    }
+    candidate_field_appearances
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +195,18 @@ nearby tickets:
 40,4,50
 55,2,20
 38,6,12";
+
+    static SAMPLE_INPUT2: &str = "class: 0-1 or 4-19
+row: 0-5 or 8-19
+seat: 0-13 or 16-19
+
+your ticket:
+11,12,13
+
+nearby tickets:
+3,9,18
+15,1,5
+5,14,9";
 
     #[test]
     fn check_parse() {
@@ -140,5 +241,65 @@ nearby tickets:
         let input =
             std::fs::read_to_string("src/day16/input.in").expect("failed to read day16 input");
         assert_eq!(solve_p1(&input), 23009);
+    }
+
+    #[test]
+    fn check_p2() {
+        let input =
+            std::fs::read_to_string("src/day16/input.in").expect("failed to read day16 input");
+        assert_eq!(
+            solve_p2(SAMPLE_INPUT2),
+            vec![
+                ("class".to_string(), vec![1usize]),
+                ("row".to_string(), vec![0]),
+                ("seat".to_string(), vec![2])
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert_eq!(
+            solve_p2(&input),
+            vec![
+                ("row".to_string(), vec![0]),
+                ("seat".to_string(), vec![1]),
+                ("arrival location".to_string(), vec![2]),
+                ("duration".to_string(), vec![3]),
+                ("departure date".to_string(), vec![4]),
+                ("route".to_string(), vec![5]),
+                ("wagon".to_string(), vec![6]),
+                ("departure station".to_string(), vec![7]),
+                ("price".to_string(), vec![8]),
+                ("departure location".to_string(), vec![9]),
+                ("departure platform".to_string(), vec![10]),
+                ("departure track".to_string(), vec![11]),
+                ("zone".to_string(), vec![12]),
+                ("type".to_string(), vec![13]),
+                ("departure time".to_string(), vec![14]),
+                ("arrival track".to_string(), vec![15]),
+                ("arrival station".to_string(), vec![16]),
+                ("class".to_string(), vec![17]),
+                ("arrival platform".to_string(), vec![18]),
+                ("train".to_string(), vec![19]),
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+
+    #[test]
+    fn ans_p2() {
+        let mine = ticket_parser(
+            "79,193,53,97,137,179,131,73,191,139,197,181,67,71,211,199,167,61,59,127",
+        )
+        .ok()
+        .unwrap()
+        .1
+        .iter()
+        .map(|x| *x as i64)
+        .collect::<Vec<_>>();
+        assert_eq!(
+            mine[4] * mine[7] * mine[9] * mine[10] * mine[11] * mine[14],
+            1
+        );
     }
 }
