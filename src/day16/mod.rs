@@ -299,7 +299,7 @@ nearby tickets:
         .collect::<Vec<_>>();
         assert_eq!(
             mine[4] * mine[7] * mine[9] * mine[10] * mine[11] * mine[14],
-            1
+            10458887314153
         );
     }
 }
